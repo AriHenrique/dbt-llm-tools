@@ -1,36 +1,27 @@
 import streamlit as st
+import boto3
+from tinydb import TinyDB, Query
 
 from menu import menu
-from styles import button_override
 from settings import load_session_state_from_db
-
-from dbt_llm_tools import DbtProject, VectorStore, DbtModel
+from dbt_llm_tools import VectorStore, DbtProject, DbtModel
 
 st.set_page_config(page_title="Configuration", page_icon="🤖", layout="wide")
 
 menu()
-button_override()
 load_session_state_from_db()
 
 st.title("Vector Store")
-st.caption(
-    f"Your vector store is located at {st.session_state.get('vector_store_path')}."
-)
+st.caption(f"Your vector store is located at {st.session_state.get('vector_store_path')}")
 
 vector_store = VectorStore(
-    vector_db_path=st.session_state.get("vector_store_path", ".local_storage"),
-    embedding_model_name=st.session_state.get(
-        "openai_embedding_model", "text-embedding-3-large"
-    ),
-    openai_api_key=st.session_state.get("openai_api_key", ""),
+    vector_db_path=st.session_state.get("vector_store_path", ".local_storage/chroma.db"),
 )
 
 setting_tab, view_tab = st.tabs(["Settings", "View Vector Store"])
 
-
 def convert_text_input_to_list(text_input):
     return text_input.strip().split("\n") if text_input else None
-
 
 with setting_tab:
     st.subheader("Models for Chatbot Context")
@@ -40,7 +31,7 @@ with setting_tab:
         Select the models that you'd like to make available to the chatbot.
         If the models have documentation, it will be loaded into the vector store and used to generate
         chatbot responses.
-
+        
         You can choose to leave all the fields blank to include all the models in your DBT project.
         """
     )
@@ -50,9 +41,7 @@ with setting_tab:
     if "dbt_project_root" in st.session_state:
         dbt_project = DbtProject(
             dbt_project_root=st.session_state.get("dbt_project_root", ""),
-            database_path=st.session_state.get(
-                "local_db_path", ".local_storage/db.json"
-            ),
+            database_path=st.session_state.get("local_db_path", ".local_storage/db.json"),
         )
 
         models_to_include = st.text_area(
@@ -85,8 +74,8 @@ with setting_tab:
 
         with col1:
             if st.button(
-                "Preview Models",
-                help="Preview the models that will be loaded into the vector store.",
+                    "Preview Models",
+                    help="Preview the models that will be loaded into the vector store.",
             ):
                 models = dbt_project.get_models(
                     models=convert_text_input_to_list(models_to_include),
@@ -96,7 +85,7 @@ with setting_tab:
 
         with col2:
             if st.button(
-                "Load to Vector Store", help="Load the models into the vector store."
+                    "Load to Vector Store", help="Load the models into the vector store."
             ):
                 models = dbt_project.get_models(
                     models=convert_text_input_to_list(models_to_include),
@@ -110,16 +99,15 @@ with setting_tab:
                     if "documentation" in model
                 ]
 
-                # st.write(models_to_store)
                 vector_store.upsert_models(models_to_store)
 
                 st.toast("Models loaded into the vector store!", icon="✅")
 
         with col3:
             if st.button(
-                "Clear Vector Store",
-                help="Delete all models from the vector store.",
-                type="primary",
+                    "Clear Vector Store",
+                    help="Delete all models from the vector store.",
+                    type="primary",
             ):
                 vector_store.reset_collection()
                 st.toast("Vector store cleared!", icon="🗑️")
@@ -161,7 +149,6 @@ with setting_tab:
     else:
         st.info("No models to preview.")
 
-
 with view_tab:
     st.subheader("Explore Vector Store")
 
@@ -171,7 +158,7 @@ with view_tab:
         st.dataframe([model["id"] for model in stored_models], use_container_width=True)
 
     if searched_model_name := st.selectbox(
-        "Select Model", [model["id"] for model in stored_models]
+            "Select Model", [model["id"] for model in stored_models]
     ):
         searched_model = next(
             (x for x in stored_models if x["id"] == searched_model_name), None
@@ -179,5 +166,4 @@ with view_tab:
 
         if searched_model is not None:
             st.markdown(searched_model["document"])
-
             st.divider()

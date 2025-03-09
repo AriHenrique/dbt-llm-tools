@@ -2,85 +2,41 @@ import json
 import os
 
 import yaml
-from openai import OpenAI
+import boto3
 
 from dbt_llm_tools.dbt_project import DbtProject
 from dbt_llm_tools.instructions import INTERPRET_MODEL_INSTRUCTIONS
 from dbt_llm_tools.types import DbtModelDict, DbtModelDirectoryEntry, PromptMessage
 
 
-class MyDumper(yaml.Dumper):  # pylint: disable=too-many-ancestors
-    """
-    A custom yaml dumper that indents the yaml output like dbt does.
-    """
-
+class MyDumper(yaml.Dumper):
     def increase_indent(self, flow=False, indentless=False):
         return super().increase_indent(flow, False)
 
 
 class DocumentationGenerator:
-    """
-    A class that generates documentation for dbt models using large language models.
-    """
-
     def __init__(
-        self,
-        dbt_project_root: str,
-        openai_api_key: str,
-        language_model: str = "gpt-4o",
-        database_path: str = "./directory.json",
+            self,
+            dbt_project_root: str,
+            bedrock_model_id: str = "anthropic.claude-v2",
+            database_path: str = "./directory.json",
     ) -> None:
-        """
-        Initializes a Documentation Generator object.
-
-        Args:
-            dbt_project_root (str): Root of the dbt project
-            openai_api_key (str): OpenAI API key
-            language_model (str, optional): The language model to use for generating documentation.
-            Defaults to "gpt-4o".
-            database_path (str, optional): Path to the directory file that stores the parsed dbt project.
-            Defaults to "./directory.json".
-
-        Attributes:
-            dbt_project (DbtProject): A DbtProject object representing the dbt project.
-
-        Methods:
-            interpret_model: Interpret a dbt model using the language model.
-            generate_documentation: Generate documentation for a dbt model.
-        """
         self.dbt_project = DbtProject(
             dbt_project_root=dbt_project_root, database_path=database_path
         )
 
-        self.__language_model = language_model
-        self.__client = OpenAI(api_key=openai_api_key)
+        self.__bedrock_client = boto3.client(service_name="bedrock-runtime")
+        self.__bedrock_model_id = bedrock_model_id
 
     def __get_system_prompt(self, message: str) -> PromptMessage:
-        """
-        Get the system prompt for the language model.
-
-        Args:
-            message (str): The message to include in the system prompt.
-
-        Returns:
-            dict: The system prompt for the language model.
-        """
         return {
             "role": "system",
             "content": message,
         }
 
     def __save_interpretation_to_yaml(
-        self, model: DbtModelDict, overwrite_existing: bool = False
+            self, model: DbtModelDict, overwrite_existing: bool = False
     ) -> None:
-        """
-        Save the interpretation of a model to a yaml file.
-
-        Args:
-            model (dict): The model to save the interpretation for.
-            overwrite_existing (bool, optional): Whether to overwrite the existing model
-            yaml documentation if it exists. Defaults to False.
-        """
         yaml_path = model.get("yaml_path")
 
         if yaml_path is not None:
@@ -122,27 +78,16 @@ class DocumentationGenerator:
             )
 
     def interpret_model(self, model: DbtModelDirectoryEntry) -> DbtModelDict:
-        """
-        Interpret a dbt model using the large language model.
-
-        Args:
-            model (dict): The dbt model to interpret.
-
-        Returns:
-            dict: The interpretation of the model.
-        """
         print(f"Interpreting model: {model['name']}")
 
         prompt = []
         refs = model.get("refs", [])
 
         prompt.append(self.__get_system_prompt(INTERPRET_MODEL_INSTRUCTIONS))
-
         prompt.append(
             self.__get_system_prompt(
                 f"""
-                The model you are interpreting is called {model["name"]}  following is the Jinja SQL code for the model:
-
+                The model you are interpreting is called {model["name"]} following is the Jinja SQL code for the model:
                 {model.get("sql_contents")}
                 """
             )
@@ -152,7 +97,6 @@ class DocumentationGenerator:
             prompt.append(
                 self.__get_system_prompt(
                     f"""
-
                     The model {model["name"]} references the following models: {", ".join(refs)}.
                     The interpretation for each of these models is as follows:
                     """
@@ -161,57 +105,40 @@ class DocumentationGenerator:
 
             for ref in refs:
                 ref_model = self.dbt_project.get_single_model(ref)
-
                 prompt.append(
                     self.__get_system_prompt(
                         f"""
-
                         The model {ref} is interpreted as follows:
                         {json.dumps(ref_model.get("interpretation"), indent=4)}
                         """
                     )
                 )
 
-        completion = self.__client.chat.completions.create(
-            model=self.__language_model,
-            messages=prompt,
+        response = self.__bedrock_client.invoke_model(
+            modelId=self.__bedrock_model_id,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({"input": prompt}),
         )
-
-        response = (
-            completion.choices[0]
-            .message.content.replace("```json", "")
-            .replace("```", "")
-        )
-
-        return json.loads(response)
+        response_body = json.loads(response["body"].read())
+        return json.loads(response_body["completion"])
 
     def generate_documentation(
-        self, model_name: str, write_documentation_to_yaml: bool = False
+            self, model_name: str, write_documentation_to_yaml: bool = False
     ) -> DbtModelDict:
-        """
-        Generate documentation for a dbt model.
-
-        Args:
-            model_name (str): The name of the model to generate documentation for.
-            write_documentation_to_yaml (bool, optional): Whether to save the documentation to a yaml file.
-            Defaults to False.
-        """
         model = self.dbt_project.get_single_model(model_name)
 
         for dep in model.get("deps", []):
             dep_model = self.dbt_project.get_single_model(dep)
-
             if dep_model.get("interpretation") is None:
                 dep_model["interpretation"] = self.interpret_model(dep_model)
                 self.dbt_project.update_model_directory(dep_model)
 
         interpretation = self.interpret_model(model)
-
         model["interpretation"] = interpretation
 
         if write_documentation_to_yaml:
             self.__save_interpretation_to_yaml(model)
 
         self.dbt_project.update_model_directory(model)
-
         return interpretation

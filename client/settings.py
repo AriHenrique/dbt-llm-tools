@@ -1,7 +1,6 @@
 import streamlit as st
 from tinydb import TinyDB, Query
 
-
 def load_session_state_from_db():
     if "local_db_path" not in st.session_state:
         st.session_state["local_db_path"] = ".local_storage/db.json"
@@ -14,15 +13,14 @@ def load_session_state_from_db():
             if key != "type":
                 st.session_state[key] = settings[key]
 
-    if "openai_chatbot_model" not in st.session_state:
-        st.session_state["openai_chatbot_model"] = "gpt-4o"
+    if "bedrock_chatbot_model" not in st.session_state:
+        st.session_state["bedrock_chatbot_model"] = "anthropic.claude-v2"
 
-    if "openai_embedding_model" not in st.session_state:
-        st.session_state["openai_embedding_model"] = "text-embedding-3-large"
+    if "bedrock_embedding_model" not in st.session_state:
+        st.session_state["bedrock_embedding_model"] = "amazon.titan-embed-text-v1"
 
     if "vector_store_path" not in st.session_state:
         st.session_state["vector_store_path"] = ".local_storage/chroma.db"
-
 
 def save_session_to_db():
     db = TinyDB(
@@ -34,19 +32,12 @@ def save_session_to_db():
         {
             "type": "settings",
             "dbt_project_root": st.session_state.get("dbt_project_root", ""),
-            "openai_api_key": st.session_state.get("openai_api_key", ""),
-            "openai_chatbot_model": st.session_state.get("openai_chatbot_model", ""),
-            "openai_embedding_model": st.session_state.get(
-                "openai_embedding_model", ""
-            ),
-            "vector_store_path": st.session_state.get(
-                "vector_store_path", ".local_storage"
-            ),
-            "local_db_path": st.session_state.get(
-                "local_db_path", ".local_storage/db.json"
-            ),
+            "bedrock_chatbot_model": st.session_state.get("bedrock_chatbot_model", ""),
+            "bedrock_embedding_model": st.session_state.get("bedrock_embedding_model", ""),
+            "vector_store_path": st.session_state.get("vector_store_path", ".local_storage"),
+            "local_db_path": st.session_state.get("local_db_path", ".local_storage/db.json"),
         },
         Query().type == "settings",
-    )
+        )
 
     st.toast("Settings saved to file!", icon="📁")
